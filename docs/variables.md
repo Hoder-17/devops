@@ -26,6 +26,17 @@
 | `SONAR_HOST_URL` | 否 | `https://sonar.company.com` | SonarQube 服务地址。为空时可跳过 SonarQube 扫描。 | 可提交到 Git |
 | `SONAR_TOKEN` | 否 | 通过 Secret 注入 | SonarQube 认证 Token，用于 CI 扫描上传结果。 | 必须放入 Secret 或 Credentials |
 
+## 兼容变量迁移
+
+新建或修改的 Pipeline、Tekton Task、脚本和 Helm values 必须使用上述标准变量。为避免迁移期间中断现有调用，入口脚本可以暂时支持以下别名：
+
+| 旧变量 | 标准变量 | 兼容规则 |
+|---|---|---|
+| `DEPLOY_ENV` | `APP_ENV` | 仅在未设置 `APP_ENV` 时使用；两者同时设置且值不同必须校验失败。 |
+| `IMAGE_NAME` | `IMAGE_REPOSITORY` | 仅在未设置 `IMAGE_REPOSITORY` 时使用；两者同时设置且值不同必须校验失败。 |
+
+标准变量优先于兼容变量。兼容变量仅用于既有调用迁移，不应出现在新的配置示例或新流水线参数中。
+
 ## 可提交到 Git 的变量
 
 以下变量不应包含认证信息，可写入 `.env.example`、Helm values、Pipeline 参数示例或文档：

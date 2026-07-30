@@ -231,15 +231,17 @@ devops-platform/
 | `GIT_REPO_URL` | 业务代码仓库 | `https://github.com/org/order-service.git` |
 | `GIT_BRANCH` | 分支 | `main` |
 | `GIT_COMMIT_SHA` | commit SHA | `abc1234` |
-| `IMAGE_REGISTRY` | 镜像仓库地址 | `harbor.company.com` |
-| `IMAGE_PROJECT` | Harbor 项目 | `business` |
-| `IMAGE_NAME` | 镜像名 | `harbor.company.com/business/order-service` |
-| `IMAGE_TAG` | 镜像 tag | `abc1234` |
+| `APP_ENV` | 部署环境 | `dev/test/staging/prod` |
+| `IMAGE_REPOSITORY` | 完整镜像仓库路径（不含 Tag） | `harbor.company.com/business/order-service` |
+| `HARBOR_URL` | Harbor 服务访问地址（不含凭据） | `https://harbor.company.com` |
 | `GITOPS_REPO_URL` | GitOps 仓库 | `git@git.company.com:devops/gitops-repo.git` |
-| `DEPLOY_ENV` | 部署环境 | `dev/test/staging/prod` |
+| `GITOPS_BRANCH` | GitOps 目标分支 | `main` |
+| `GITOPS_APP_PATH` | GitOps 应用环境配置路径 | `apps/order-service/overlays/dev` |
 | `K8S_NAMESPACE` | K8s 命名空间 | `order-service-dev` |
-| `ARGOCD_SERVER` | Argo CD 地址 | `argocd.company.com` |
+| `ARGOCD_NAMESPACE` | Argo CD 控制面命名空间 | `argocd` |
 | `SONAR_HOST_URL` | SonarQube 地址 | `https://sonar.company.com` |
+
+以 `docs/variables.md` 为变量命名的唯一权威来源。迁移期间可在入口脚本中兼容 `DEPLOY_ENV`（映射至 `APP_ENV`）和 `IMAGE_NAME`（映射至 `IMAGE_REPOSITORY`）；如果标准变量和别名同时存在但值不同，必须失败，不得静默选择。
 
 ### 4.1 镜像 Tag 规则
 
@@ -341,7 +343,7 @@ Step 12  执行 validate-manifests.sh 验证全部 YAML / Helm 模板
 请生成 .env.example。
 
 要求包含：
-APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT、IMAGE_NAME、IMAGE_TAG、GITOPS_REPO_URL、DEPLOY_ENV、K8S_NAMESPACE、ARGOCD_SERVER、SONAR_HOST_URL。
+APP_NAME、APP_LANG、APP_ENV、IMAGE_REPOSITORY、IMAGE_TAG、HARBOR_URL、GITOPS_REPO_URL、GITOPS_BRANCH、GITOPS_APP_PATH、K8S_NAMESPACE、ARGOCD_NAMESPACE、SONAR_HOST_URL。
 所有值使用示例值，不允许包含真实密码。
 ```
 
@@ -437,7 +439,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 构建 Docker 镜像。
 
 要求：
-1. 读取 IMAGE_NAME 和 IMAGE_TAG。
+1. 读取 IMAGE_REPOSITORY 和 IMAGE_TAG。
 2. 禁止 IMAGE_TAG=latest。
 3. 优先使用 docker buildx build；如果不可用，则使用 docker build。
 4. 支持传入 Dockerfile 路径，默认 Dockerfile。
@@ -455,19 +457,21 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 
 输入环境变量：
 - APP_NAME
-- IMAGE_NAME
+- IMAGE_REPOSITORY
 - IMAGE_TAG
 - GITOPS_REPO_URL
-- DEPLOY_ENV
+- GITOPS_BRANCH
+- GITOPS_APP_PATH
+- APP_ENV
 - GIT_USER_NAME
 - GIT_USER_EMAIL
 
 要求：
 1. 克隆 GitOps 仓库到临时目录。
-2. 定位文件：gitops-repo/apps/${APP_NAME}/overlays/${DEPLOY_ENV}/values.yaml。
+2. 通过 `GITOPS_APP_PATH` 定位 `${GITOPS_APP_PATH}/values.yaml`；如果路径未设置，可由 `apps/${APP_NAME}/overlays/${APP_ENV}` 推导。
 3. 使用 yq 修改 image.repository 和 image.tag。
 4. 如果没有变化，不提交，正常退出 0。
-5. 如果有变化，commit message 为：deploy(${APP_NAME}): update ${DEPLOY_ENV} image to ${IMAGE_TAG}。
+5. 如果有变化，commit message 为：deploy(${APP_NAME}): update ${APP_ENV} image to ${IMAGE_TAG}。
 6. push 到远端。
 7. 不在日志中输出 Token 或密码。
 8. 使用 bash strict mode。
@@ -483,8 +487,10 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 
 输入环境变量：
 - APP_NAME
-- DEPLOY_ENV
+- APP_ENV
 - GITOPS_REPO_URL
+- GITOPS_BRANCH
+- GITOPS_APP_PATH
 - ROLLBACK_COMMIT，可选。如果为空，则回滚最近一次修改该应用环境 values.yaml 的 commit。
 
 要求：
@@ -894,7 +900,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 8. 构建 Docker 镜像。
 9. 执行 security/trivy-scan.sh。
 10. 登录 Harbor 并 push 镜像，凭据从 Jenkins credentials 获取。
-11. 根据分支映射 DEPLOY_ENV。
+11. 根据分支映射 APP_ENV。
 12. 只有 develop、release/*、main、tag 才更新 GitOps。
 13. 调用 scripts/update-gitops.sh。
 14. prod 环境要求 input 人工确认。
@@ -957,7 +963,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 
 要求：
 1. 调用 scripts/update-gitops.sh。
-2. 支持传入 APP_NAME、IMAGE_NAME、IMAGE_TAG、DEPLOY_ENV。
+2. 支持传入 APP_NAME、IMAGE_REPOSITORY、IMAGE_TAG、APP_ENV、GITOPS_BRANCH、GITOPS_APP_PATH。
 3. 不输出敏感信息。
 ```
 
@@ -1032,7 +1038,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 
 要求：
 1. 使用 kaniko 构建镜像。
-2. 参数 image-name、image-tag、dockerfile、context。
+2. 参数 image-repository、image-tag、dockerfile、context。
 3. 禁止 image-tag 为 latest。
 4. push 到 Harbor。
 5. 使用 ServiceAccount 中的 docker config。
@@ -1056,7 +1062,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 请生成 Tekton Task update-gitops。
 
 要求：
-1. 参数 app-name、image-name、image-tag、deploy-env、gitops-repo-url。
+1. 参数 app-name、image-repository、image-tag、app-env、gitops-repo-url、gitops-branch、gitops-app-path。
 2. 克隆 GitOps repo。
 3. 使用 yq 修改对应 values.yaml。
 4. 有变化才 commit + push。
@@ -1070,7 +1076,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 
 要求：
 1. 使用 git-clone、detect-language、test、build、image-build-kaniko、trivy-scan、update-gitops。
-2. 参数包含 repo-url、revision、app-name、image-name、image-tag、deploy-env、gitops-repo-url。
+2. 参数包含 repo-url、revision、app-name、image-repository、image-tag、app-env、gitops-repo-url、gitops-branch、gitops-app-path。
 3. detect-language 的 result 传给 test 和 build。
 4. trivy-scan 必须在 image build 后执行。
 5. update-gitops 必须在 trivy-scan 成功后执行。
@@ -1087,7 +1093,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 2. 使用 PVC workspace。
 3. 使用 tekton-build-sa。
 4. 参数使用 order-service 示例。
-5. deploy-env 使用 dev。
+5. app-env 使用 dev。
 ```
 
 ### 文件：`ci-tekton/triggers/eventlistener.yaml`
@@ -1121,7 +1127,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 要求：
 1. 根据 webhook 参数创建 PipelineRun。
 2. image-tag 使用 commit short sha。
-3. deploy-env 根据分支推导。
+3. app-env 根据分支推导。
 4. 参数完整传递给 Pipeline。
 ```
 
@@ -1138,7 +1144,7 @@ APP_NAME、APP_LANG、GIT_REPO_URL、GIT_BRANCH、IMAGE_REGISTRY、IMAGE_PROJECT
 扫描 Docker 镜像漏洞和错误配置。
 
 输入：
-- IMAGE_NAME
+- IMAGE_REPOSITORY
 - IMAGE_TAG
 或完整 IMAGE_URL。
 

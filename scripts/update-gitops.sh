@@ -22,6 +22,16 @@ usage() {
     '  --commit-user        Git commit user name.' \
     '  --commit-email       Git commit user email.' \
     '' \
+    'Environment defaults (CLI options take precedence):' \
+    '  GITOPS_REPO_URL, GITOPS_BRANCH, GITOPS_APP_PATH, IMAGE_REPOSITORY,' \
+    '  IMAGE_TAG, GIT_USER_NAME, GIT_USER_EMAIL, APP_NAME, APP_ENV.' \
+    '  When GITOPS_APP_PATH is unset, APP_NAME and APP_ENV derive' \
+    '  apps/<APP_NAME>/overlays/<APP_ENV>.' \
+    '' \
+    'Migration aliases:' \
+    '  DEPLOY_ENV is accepted for APP_ENV and IMAGE_NAME for IMAGE_REPOSITORY.' \
+    '  Conflicting standard and alias values are rejected.' \
+    '' \
     'The script updates <app-path>/values.yaml:' \
     '  image.repository' \
     '  image.tag' \
@@ -64,6 +74,44 @@ mask_repo_url() {
 
 is_blank() {
   [[ -z "${1//[[:space:]]/}" ]]
+}
+
+validate_alias() {
+  local standard_name="$1"
+  local standard_value="$2"
+  local alias_name="$3"
+  local alias_value="$4"
+
+  if ! is_blank "$standard_value" && ! is_blank "$alias_value" && [[ "$standard_value" != "$alias_value" ]]; then
+    die "conflicting values for ${standard_name} and compatibility alias ${alias_name}"
+  fi
+}
+
+resolve_environment_defaults() {
+  local standard_app_env="${APP_ENV:-}"
+  local legacy_deploy_env="${DEPLOY_ENV:-}"
+  local standard_image_repository="${IMAGE_REPOSITORY:-}"
+  local legacy_image_name="${IMAGE_NAME:-}"
+
+  validate_alias "APP_ENV" "$standard_app_env" "DEPLOY_ENV" "$legacy_deploy_env"
+  validate_alias "IMAGE_REPOSITORY" "$standard_image_repository" "IMAGE_NAME" "$legacy_image_name"
+
+  app_name="${APP_NAME:-}"
+  app_env="$standard_app_env"
+  [[ -n "$app_env" ]] || app_env="$legacy_deploy_env"
+  [[ -n "$standard_image_repository" ]] || standard_image_repository="$legacy_image_name"
+
+  [[ -n "$repo_url" ]] || repo_url="${GITOPS_REPO_URL:-}"
+  [[ -n "$branch" ]] || branch="${GITOPS_BRANCH:-}"
+  [[ -n "$app_path" ]] || app_path="${GITOPS_APP_PATH:-}"
+  [[ -n "$image_repository" ]] || image_repository="$standard_image_repository"
+  [[ -n "$image_tag" ]] || image_tag="${IMAGE_TAG:-}"
+  [[ -n "$commit_user" ]] || commit_user="${GIT_USER_NAME:-}"
+  [[ -n "$commit_email" ]] || commit_email="${GIT_USER_EMAIL:-}"
+
+  if is_blank "$app_path" && ! is_blank "$app_name" && ! is_blank "$app_env"; then
+    app_path="apps/${app_name}/overlays/${app_env}"
+  fi
 }
 
 parse_args() {
@@ -132,9 +180,15 @@ validate_inputs() {
   is_blank "$commit_user" && die "--commit-user is required"
   is_blank "$commit_email" && die "--commit-email is required"
 
-  [[ "$image_tag" == "latest" ]] && die "IMAGE_TAG=latest is not allowed"
-  [[ "$app_path" = /* ]] && die "--app-path must be relative to the GitOps repository root"
-  [[ "$app_path" == *".."* ]] && die "--app-path must not contain '..'"
+  if [[ "$image_tag" == "latest" ]]; then
+    die "IMAGE_TAG=latest is not allowed"
+  fi
+  if [[ "$app_path" = /* ]]; then
+    die "--app-path must be relative to the GitOps repository root"
+  fi
+  if [[ "$app_path" == *".."* ]]; then
+    die "--app-path must not contain '..'"
+  fi
 }
 
 yaml_quote() {
@@ -224,6 +278,7 @@ update_values_file() {
 }
 
 parse_args "$@"
+resolve_environment_defaults
 validate_inputs
 require_command git
 require_command mktemp
@@ -273,7 +328,11 @@ git config user.email "$commit_email"
 
 git add "$values_file"
 
-commit_message="deploy(${app_path}): update image to ${image_tag}"
+if ! is_blank "${app_name:-}" && ! is_blank "${app_env:-}"; then
+  commit_message="deploy(${app_name}): update ${app_env} image to ${image_tag}"
+else
+  commit_message="deploy(${app_path}): update image to ${image_tag}"
+fi
 log "creating GitOps commit for image tag: $image_tag"
 git commit --quiet -m "$commit_message"
 

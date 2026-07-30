@@ -30,6 +30,10 @@
 8. 配置 `observability/`，补齐指标、日志、链路追踪和告警闭环。
 9. 使用 `scripts/` 中的本地校验命令检查 YAML、Helm Chart、脚本权限和目录结构。
 
+## 变量规范
+
+`docs/variables.md` 是 Jenkins、Tekton、脚本、Helm values、Argo CD 和安全扫描流程的唯一变量契约。新增配置必须使用 `APP_ENV`、`IMAGE_REPOSITORY`、`GITOPS_BRANCH` 和 `GITOPS_APP_PATH` 等标准变量；迁移期仅由入口脚本兼容 `DEPLOY_ENV` 和 `IMAGE_NAME`，且标准变量与别名的冲突必须作为配置错误处理。
+
 ## 安全注意事项
 
 - 不要把真实 Token、密码、kubeconfig、Harbor 密码、Git 私钥或云厂商 Access Key 写入代码、文档、示例文件或提交历史。
