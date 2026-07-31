@@ -37,7 +37,8 @@ usage() {
     '  image.tag' \
     '' \
     'No credentials are printed. Pass authentication through Git credential helpers,' \
-    'SSH agent, CI credentials, Kubernetes Secret, External Secrets, or Vault.'
+    'SSH agent, CI credentials, Kubernetes Secret, External Secrets, or Vault.' \
+    'Requires yq v4 to update YAML safely.'
 }
 
 log() {
@@ -200,81 +201,11 @@ yaml_quote() {
 
 update_values_file() {
   local values_file="$1"
-  local tmp_file
-  tmp_file="$(mktemp)"
 
-  awk -v repo="$(yaml_quote "$image_repository")" -v tag="$(yaml_quote "$image_tag")" '
-    function indent_of(line) {
-      match(line, /^[ ]*/)
-      return RLENGTH
-    }
-
-    function emit_missing() {
-      if (in_image) {
-        if (!saw_repository) {
-          print child_indent "repository: " repo
-        }
-        if (!saw_tag) {
-          print child_indent "tag: " tag
-        }
-      }
-    }
-
-    BEGIN {
-      in_image = 0
-      saw_image = 0
-      saw_repository = 0
-      saw_tag = 0
-      image_indent = -1
-      child_indent = "  "
-    }
-
-    /^[ ]*image:[ ]*$/ {
-      emit_missing()
-      in_image = 1
-      saw_image = 1
-      saw_repository = 0
-      saw_tag = 0
-      image_indent = indent_of($0)
-      child_indent = substr($0, 1, image_indent) "  "
-      print
-      next
-    }
-
-    {
-      current_indent = indent_of($0)
-      if (in_image && $0 !~ /^[ ]*$/ && current_indent <= image_indent && $0 !~ /^[ ]*#/) {
-        emit_missing()
-        in_image = 0
-      }
-
-      if (in_image && $0 ~ /^[ ]*repository:[ ]*/) {
-        print child_indent "repository: " repo
-        saw_repository = 1
-        next
-      }
-
-      if (in_image && $0 ~ /^[ ]*tag:[ ]*/) {
-        print child_indent "tag: " tag
-        saw_tag = 1
-        next
-      }
-
-      print
-    }
-
-    END {
-      emit_missing()
-      if (!saw_image) {
-        print ""
-        print "image:"
-        print "  repository: " repo
-        print "  tag: " tag
-      }
-    }
-  ' "$values_file" > "$tmp_file"
-
-  mv "$tmp_file" "$values_file"
+  IMAGE_REPOSITORY="$image_repository" IMAGE_TAG="$image_tag" \
+    yq -i \
+      '.image.repository = strenv(IMAGE_REPOSITORY) | .image.tag = strenv(IMAGE_TAG)' \
+      "$values_file"
 }
 
 parse_args "$@"
@@ -282,9 +213,8 @@ resolve_environment_defaults
 validate_inputs
 require_command git
 require_command mktemp
-require_command awk
+require_command yq
 require_command sed
-require_command mv
 require_command rm
 
 tmp_dir="$(mktemp -d)"
